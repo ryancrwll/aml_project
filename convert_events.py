@@ -12,9 +12,11 @@ class VoxelGrid(object):
         self.B = B
         self.normalize = normalize
 
-    def __call__(self, events):
+    def __call__(self, events, t_start=None, t_end=None):
         """
         :param events: NumPy array of shape (N, 4).
+        :param t_start: Optional frame start time. If provided, used for temporal normalization instead of event times.
+        :param t_end: Optional frame end time. If provided, used for temporal normalization instead of event times.
         """
         if events.shape[0] == 0:
             return torch.zeros(self.B, self.H, self.W, dtype=torch.float32)
@@ -27,8 +29,11 @@ class VoxelGrid(object):
         p = events[:, 3].astype(np.float32)
 
         # 2. Normalize timestamps to [0, B-1]
-        t_start = t[0]
-        t_end = t[-1]
+        if t_start is None or t_end is None:
+            # Fallback: use event timestamps (legacy behavior)
+            t_start = t[0]
+            t_end = t[-1]
+        
         t_total = t_end - t_start
 
         if t_total == 0:

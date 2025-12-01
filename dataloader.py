@@ -16,6 +16,7 @@ class MVSECDataset(Dataset):
             with h5py.File(data_path, 'r') as f:
                 self.events = np.array(f['davis']['left']['events'])
                 self.event_indices = np.array(f['davis']['left']['image_raw_event_inds'])
+                self.event_timestamps = np.array(f['davis']['left']['image_raw_ts'])
 
             with h5py.File(gt_path, 'r') as f:
                 if 'davis' in f:
@@ -130,8 +131,11 @@ class MVSECDataset(Dataset):
             if event_slice.dtype != np.float32:
                  event_slice = event_slice.astype(np.float32)
 
-            # 3. Create Voxel Grid (This internally uses NumPy and then converts to Torch)
-            grid = self.voxel_grid(event_slice)
+            # 3. Create Voxel Grid using frame time boundaries instead of event times
+            # This fixes the issue where all events have the same timestamp
+            t_start = self.event_timestamps[start_frame + i]
+            t_end = self.event_timestamps[start_frame + i + 1]
+            grid = self.voxel_grid(event_slice, t_start=t_start, t_end=t_end)
             voxel_seq.append(grid)
 
             # 4. Get Pose Ground Truth

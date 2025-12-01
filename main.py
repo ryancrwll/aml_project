@@ -27,7 +27,7 @@ VOXEL_PARAMS = {
 }
 OUTPUT_DIM = 6 # dx, dy, dz, d_roll, d_pitch, d_yaw
 
-# 🚨 NEW: Translation Scaling Factor (MUST MATCH TRAIN.PY)
+# Translation Scaling Factor (MUST MATCH TRAIN.PY)
 TRANS_SCALE_FACTOR = 1000.0
 
 # --- Helper Functions ---
