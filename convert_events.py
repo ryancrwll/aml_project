@@ -33,7 +33,7 @@ class VoxelGrid(object):
             # Fallback: use event timestamps (legacy behavior)
             t_start = t[0]
             t_end = t[-1]
-        
+
         t_total = t_end - t_start
 
         if t_total == 0:

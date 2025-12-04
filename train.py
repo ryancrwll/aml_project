@@ -26,7 +26,7 @@ LR = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
-ROT_WEIGHT = 200.0
+ROT_WEIGHT = 50.0
 TRANS_SCALE_FACTOR = 1000.0
 
 # NEW HYPERPARAMETER
@@ -90,7 +90,7 @@ def train():
             loss = pose_loss(preds, targets, rot_weight=ROT_WEIGHT, trans_scale=TRANS_SCALE_FACTOR)
 
             loss.backward()
-            
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_VALUE)
 
             optimizer.step()

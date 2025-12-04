@@ -44,10 +44,10 @@ def get_gradient_stats(model):
     for p in model.parameters():
         if p.grad is not None:
             grad_norms.append(p.grad.data.norm().item())
-    
+
     if not grad_norms:
         return 0.0, 0.0, 0.0
-    
+
     grad_norms = np.array(grad_norms)
     return grad_norms.mean(), grad_norms.max(), grad_norms.min()
 
@@ -88,7 +88,7 @@ def train():
     loss_history = []
     grad_mean_history = []
     grad_max_history = []
-    
+
     for epoch in range(EPOCHS):
         model.train()
         total_loss = 0
@@ -111,12 +111,12 @@ def train():
 
             optimizer.zero_grad()
             preds = model(voxels)
-            
+
             # Diagnostics: Check prediction range
             if batch_idx == 0:
                 print(f"  [Batch 0] Pred trans range: [{preds[..., :3].min():.4f}, {preds[..., :3].max():.4f}]")
                 print(f"  [Batch 0] Pred rot range: [{preds[..., 3:].min():.6f}, {preds[..., 3:].max():.6f}]")
-            
+
             loss = pose_loss(preds, targets, rot_weight=ROT_WEIGHT, trans_scale=TRANS_SCALE_FACTOR)
 
             loss.backward()
@@ -145,11 +145,11 @@ def train():
         avg_loss = total_loss / max(1, len(loader))
         avg_grad_mean = np.mean(epoch_grad_means) if epoch_grad_means else 0.0
         avg_grad_max = np.mean(epoch_grad_maxs) if epoch_grad_maxs else 0.0
-        
+
         loss_history.append(avg_loss)
         grad_mean_history.append(avg_grad_mean)
         grad_max_history.append(avg_grad_max)
-        
+
         print(f"Epoch {epoch+1} | Avg Loss: {avg_loss:.6f} | Grad Mean: {avg_grad_mean:.6f} | Grad Max: {avg_grad_max:.6f}\n")
 
         # Check for stagnation: loss hasn't improved in last 5 epochs

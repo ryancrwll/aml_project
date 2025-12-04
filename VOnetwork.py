@@ -21,40 +21,40 @@ class VONet(nn.Module):
         self.feature_dim = feature_dim
 
         # 1. CNN Encoder (Spatial Features)
-        # # Architecture is deep to compress the high-resolution Voxel Grid (260x346)
-        # self.cnn = nn.Sequential(
-        #     # Input: (B*S, C, 260, 346)
-        #     nn.Conv2d(input_channels, 32, kernel_size=7, stride=2, padding=3),
-        #     nn.BatchNorm2d(32), nn.ReLU(),
-
-        #     nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
-        #     nn.BatchNorm2d(64), nn.ReLU(),
-
-        #     nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-        #     nn.BatchNorm2d(128), nn.ReLU(),
-
-        #     nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
-        #     nn.BatchNorm2d(256), nn.ReLU(),
-
-        #     nn.Conv2d(256, feature_dim, kernel_size=3, stride=2, padding=1),
-        #     nn.BatchNorm2d(feature_dim), nn.ReLU(),
-
-        #     # Final Average Pooling: Reduces spatial size to 1x1
-        #     nn.AdaptiveAvgPool2d((1, 1))
-        # )
+        # Architecture is deep to compress the high-resolution Voxel Grid (260x346)
         self.cnn = nn.Sequential(
-            nn.Conv2d(input_channels, 32, kernel_size=5, stride=2, padding=2), # Output spatial size approx 130x173
-            nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            # Input: (B*S, C, 260, 346)
+            nn.Conv2d(input_channels, 32, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(32), nn.ReLU(),
 
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # Output spatial size approx 65x87
-            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm2d(64), nn.ReLU(),
 
-            nn.Conv2d(64, feature_dim, kernel_size=3, stride=2, padding=1), # Output spatial size approx 33x44
-            nn.BatchNorm2d(feature_dim), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128), nn.ReLU(),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256), nn.ReLU(),
+
+            nn.Conv2d(256, feature_dim, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(feature_dim), nn.ReLU(),
 
             # Final Average Pooling: Reduces spatial size to 1x1
             nn.AdaptiveAvgPool2d((1, 1))
         )
+        # self.cnn = nn.Sequential(
+        #     nn.Conv2d(input_channels, 32, kernel_size=5, stride=2, padding=2), # Output spatial size approx 130x173
+        #     nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+
+        #     nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # Output spatial size approx 65x87
+        #     nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+
+        #     nn.Conv2d(64, feature_dim, kernel_size=3, stride=2, padding=1), # Output spatial size approx 33x44
+        #     nn.BatchNorm2d(feature_dim), nn.ReLU(inplace=True),
+
+        #     # Final Average Pooling: Reduces spatial size to 1x1
+        #     nn.AdaptiveAvgPool2d((1, 1))
+        # )
 
         # 2. RNN (Temporal Features)
         self.rnn = nn.GRU(
