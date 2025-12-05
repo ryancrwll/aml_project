@@ -42,6 +42,9 @@ class VONet(nn.Module):
             # Final Average Pooling: Reduces spatial size to 1x1
             nn.AdaptiveAvgPool2d((1, 1))
         )
+        self.dropout = nn.Dropout(p=0.5)
+
+        
         # self.cnn = nn.Sequential(
         #     nn.Conv2d(input_channels, 32, kernel_size=5, stride=2, padding=2), # Output spatial size approx 130x173
         #     nn.BatchNorm2d(32), nn.ReLU(inplace=True),
@@ -81,6 +84,7 @@ class VONet(nn.Module):
 
         # 2. RNN: Reshape for GRU: (Batch, Seq, Features)
         feat = feat.squeeze().reshape(B, S, self.feature_dim)
+        feat = self.dropout(feat)
 
         out, _ = self.rnn(feat)
 

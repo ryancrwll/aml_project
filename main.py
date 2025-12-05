@@ -30,6 +30,17 @@ OUTPUT_DIM = 6 # dx, dy, dz, d_roll, d_pitch, d_yaw
 # Translation Scaling Factor (MUST MATCH TRAIN.PY)
 TRANS_SCALE_FACTOR = 1000.0
 
+# --- Multi-camera and Calibration Configuration ---
+USE_STEREO = False  # If True: uses both left+right cameras (10 channels). If False: left camera only (5 channels)
+USE_CALIB = False   # If True: loads calibration data from YAML file. If False: skips calibration loading
+CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'  # Only used if USE_CALIB=True
+
+# EXAMPLES:
+#   Mono (left only):     USE_STEREO=False, USE_CALIB=False
+#   Stereo fusion:        USE_STEREO=True,  USE_CALIB=False
+#   Mono + Calib:         USE_STEREO=False, USE_CALIB=True
+#   Stereo + Calib:       USE_STEREO=True,  USE_CALIB=True
+
 # --- Helper Functions ---
 
 def convert_delta_to_matrix(delta):
@@ -72,9 +83,6 @@ def align_trajectories_umeyama(pred_xyz, gt_xyz):
 
     X_var_sum = np.sum(X**2)
 
-    # 🚨 CRITICAL FIX: Add Epsilon to Denominator
-    # Ensure X_var_sum is not effectively zero. This prevents division by zero
-    # and forces a non-zero scale factor if the prediction is nearly flat.
     EPSILON = 1e-6
 
     if X_var_sum < EPSILON:
@@ -112,17 +120,21 @@ def evaluate_model():
     device = torch.device(DEVICE)
 
     # 1. Setup Model and Load Weights
-    model = VONet(input_channels=VOXEL_PARAMS['B']).to(device)
+    input_channels = VOXEL_PARAMS['B'] * 2 if USE_STEREO else VOXEL_PARAMS['B']
+    model = VONet(input_channels=input_channels).to(device)
     model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
     model.eval()
-    print(f"Model loaded from {CHECKPOINT_PATH}.")
+    print(f"Model loaded from {CHECKPOINT_PATH}. Stereo: {USE_STEREO}, Input channels: {input_channels}")
 
     # 2. Setup Data
     test_dataset = MVSECDataset(
         data_path=DATA_FILE,
         gt_path=GT_FILE,
         seq_len=SEQ_LEN,
-        crop_params=VOXEL_PARAMS
+        crop_params=VOXEL_PARAMS,
+        use_stereo=USE_STEREO,
+        use_calib=USE_CALIB,
+        calib_path=CALIB_PATH if USE_CALIB else None
     )
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
 
@@ -183,7 +195,24 @@ def evaluate_model():
     print(f"Prediction Scale Factor: {scale:.4f}")
     print(f"Trajectory RMSE (ALIGNED): {rmse_trans_aligned:.4f} meters")
 
-    # 9. Visualization
+    # 9. Test if X and Y are swapped
+    print("\n--- Coordinate Swap Diagnostic ---")
+
+    # Try swapping X and Y in predictions
+    pred_xyz_swapped = pred_xyz_aligned.copy()
+    pred_xyz_swapped[:, [0, 1]] = pred_xyz_swapped[:, [1, 0]]
+
+    errors_swapped = np.linalg.norm(pred_xyz_swapped - gt_xyz, axis=1)
+    rmse_swapped = np.sqrt(np.mean(errors_swapped**2))
+
+    print(f"RMSE (X-Y original): {rmse_trans_aligned:.6f}")
+    print(f"RMSE (X-Y swapped):  {rmse_swapped:.6f}")
+
+    if rmse_swapped < rmse_trans_aligned:
+        print("⚠️  WARNING: Predictions have X and Y swapped! Using swapped version for plot.")
+        pred_xyz_aligned = pred_xyz_swapped
+
+    # 10. Visualization
     plt.figure(figsize=(10, 8))
     plt.plot(gt_xyz[:, 0], gt_xyz[:, 1], label='Ground Truth (x, y)', color='blue')
     plt.plot(pred_xyz_aligned[:, 0], pred_xyz_aligned[:, 1], label='Predicted (ALIGNED x, y)', color='red', linestyle='--')

@@ -22,6 +22,7 @@ TRAIN_DATASETS = [
 BATCH_SIZE = 4
 SEQ_LEN = 5
 EPOCHS = 50
+# LR = 5e-5
 LR = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -32,29 +33,54 @@ TRANS_SCALE_FACTOR = 1000.0
 # NEW HYPERPARAMETER
 GRAD_CLIP_VALUE = 1.0 # Standard value for gradient clipping
 
+# --- Multi-camera and Calibration Configuration ---
+USE_STEREO = True  # If True: uses both left+right cameras (10 channels). If False: left camera only (5 channels)
+USE_CALIB = False   # If True: loads calibration data from YAML file. If False: skips calibration loading
+CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'
+
 def pose_loss(pred, target, rot_weight, trans_scale):
-    target_t_scaled = target[..., :3] * trans_scale
-    pred_t_scaled = pred[..., :3]
+    """
+    Compute pose loss.
+    Inputs:
+      pred: (B, S, 6) network predictions in order [tx, ty, tz, d_roll, d_pitch, d_yaw]
+      target: (B, S, 6) ground truth in order [dx, dy, dz, d_roll, d_pitch, d_yaw]
+      trans_scale: scale factor to match prediction magnitude to GT
+    Returns: total loss = loss_translation + rot_weight * loss_rotation
+    """
+    # Translation loss: scale predictions to match GT scale
+    target_t_scaled = target[..., :3] * trans_scale  # [B, S, 3]
+    pred_t_scaled = pred[..., :3]  # [B, S, 3]
     loss_t = nn.functional.mse_loss(pred_t_scaled, target_t_scaled)
-    loss_r = nn.functional.mse_loss(pred[..., 3:], target[..., 3:])
+
+    # Rotation loss: compare Euler angles directly
+    loss_r = nn.functional.mse_loss(pred[..., 3:], target[..., 3:])  # [B, S, 3]
+
     return loss_t + rot_weight * loss_r
 
 def train():
     print(f"Starting training on {DEVICE}")
+    print(f"Stereo Mode: {USE_STEREO}, Calibration: {USE_CALIB}")
 
-    # 1. Load Datasets (Logic remains the same, relies on ConcatDataset)
+    # 1. Load Datasets with multi-camera support
     datasets = []
     for paths in TRAIN_DATASETS:
-        # ... (Loading logic omitted for brevity, assumes successful loading) ...
         d_path = paths['data']
         g_path = paths['gt']
         if not os.path.exists(d_path) or not os.path.exists(g_path):
             continue
         try:
-            ds = MVSECDataset(data_path=d_path, gt_path=g_path, seq_len=SEQ_LEN, crop_params=VOXEL_PARAMS)
+            ds = MVSECDataset(
+                data_path=d_path,
+                gt_path=g_path,
+                seq_len=SEQ_LEN,
+                crop_params=VOXEL_PARAMS,
+                use_stereo=USE_STEREO,
+                use_calib=USE_CALIB,
+                calib_path=CALIB_PATH if USE_CALIB else None
+            )
             datasets.append(ds)
         except Exception as e:
-            pass # Suppress deep load errors here
+            print(f"  Error loading {d_path}: {e}")
 
     if not datasets:
         print("FATAL: No datasets loaded. Check your file paths.")
@@ -66,7 +92,10 @@ def train():
     loader = DataLoader(combined_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
 
     # 2. Model Setup
-    model = VONet(input_channels=VOXEL_PARAMS['B']).to(DEVICE)
+    # Determine input channels based on stereo setting
+    input_channels = VOXEL_PARAMS['B'] * 2 if USE_STEREO else VOXEL_PARAMS['B']
+
+    model = VONet(input_channels=input_channels).to(DEVICE)
     optimizer = optim.Adam(model.parameters(), lr=LR)
 
     if not os.path.exists('checkpoints'):
