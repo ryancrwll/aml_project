@@ -49,6 +49,103 @@ class MVSECDataset(Dataset):
                     self.event_indices_dict[cam] = np.array(f['davis'][cam]['image_raw_event_inds'])
                     self.event_timestamps_dict[cam] = np.array(f['davis'][cam]['image_raw_ts'])
 
+                # Try to find IMU data inside the HDF5. Common locations: '/imu', '/davis/imu'
+                # Support per-camera IMUs (left/right) and fallback single IMU stream.
+                self.imu_sources = {}  # map camera name -> (timestamps, measurements)
+
+                # Helper to load potential imu dataset
+                def _load_imu_group(group):
+                    # Accept dataset or group. If a dataset is passed, return its array.
+                    if isinstance(group, h5py.Dataset):
+                        return np.array(group)
+
+                    # group may contain datasets; try 'data' first
+                    if isinstance(group, h5py.Group) and 'data' in group:
+                        arr = np.array(group['data'])
+                        return arr
+
+                    # otherwise search for a dataset with 6-7 columns
+                    if isinstance(group, h5py.Group):
+                        for k in group.keys():
+                            try:
+                                ds = group[k]
+                                if isinstance(ds, h5py.Dataset):
+                                    arr = np.array(ds)
+                                    if arr.ndim == 2 and arr.shape[1] >= 6:
+                                        return arr
+                            except Exception:
+                                continue
+
+                    return None
+
+                # First try per-camera IMU under davis/left/imu and davis/right/imu
+                def _try_camera_imu(cam_group, cam_name):
+                    arr = _load_imu_group(cam_group)
+                    if arr is None:
+                        return False
+                    cols = arr.shape[1]
+                    imu_ts = None
+                    imu_meas = None
+                    if cols >= 7:
+                        if np.all(np.diff(arr[:, 0]) >= 0):
+                            imu_ts = arr[:, 0]
+                            imu_meas = arr[:, 1:7]
+                        elif np.all(np.diff(arr[:, -1]) >= 0):
+                            imu_ts = arr[:, -1]
+                            imu_meas = arr[:, :6]
+                        else:
+                            imu_ts = arr[:, 0]
+                            imu_meas = arr[:, 1:7]
+                    elif cols == 6:
+                        # No timestamps -> cannot align accurately
+                        return False
+
+                    if imu_ts is not None and imu_meas is not None:
+                        self.imu_sources[cam_name] = (imu_ts.astype(np.float64), imu_meas.astype(np.float32))
+                        return True
+                    return False
+
+                # Check canonical per-camera locations
+                if 'davis' in f and 'left' in f['davis'] and 'imu' in f['davis']['left']:
+                    _try_camera_imu(f['davis']['left']['imu'], 'left')
+                if 'davis' in f and 'right' in f['davis'] and 'imu' in f['davis']['right']:
+                    _try_camera_imu(f['davis']['right']['imu'], 'right')
+
+                # If no per-camera IMU found, search top-level or /imu
+                if len(self.imu_sources) == 0:
+                    imu_arr = None
+                    if 'imu' in f:
+                        imu_arr = _load_imu_group(f['imu'])
+                    else:
+                        for name, item in f.items():
+                            if isinstance(item, h5py.Group) and 'imu' in name.lower():
+                                imu_arr = _load_imu_group(item)
+                                if imu_arr is not None:
+                                    break
+
+                    if imu_arr is not None:
+                        cols = imu_arr.shape[1]
+                        if cols >= 7:
+                            if np.all(np.diff(imu_arr[:, 0]) >= 0):
+                                imu_ts = imu_arr[:, 0]
+                                imu_meas = imu_arr[:, 1:7]
+                            elif np.all(np.diff(imu_arr[:, -1]) >= 0):
+                                imu_ts = imu_arr[:, -1]
+                                imu_meas = imu_arr[:, :6]
+                            else:
+                                imu_ts = imu_arr[:, 0]
+                                imu_meas = imu_arr[:, 1:7]
+                        else:
+                            imu_ts = None
+                            imu_meas = None
+
+                        if imu_ts is not None and imu_meas is not None:
+                            # assign to 'left' as default single-stream source
+                            self.imu_sources['left'] = (imu_ts.astype(np.float64), imu_meas.astype(np.float32))
+
+                # Final availability flag
+                self.imu_available = len(self.imu_sources) > 0
+
             with h5py.File(gt_path, 'r') as f:
                 if 'davis' in f:
                     self.pose = np.array(f['davis']['left']['pose'])
@@ -301,6 +398,8 @@ class MVSECDataset(Dataset):
             voxel_seq_right = []
             pose_seq = []
 
+            imu_feats_seq = []
+            imu_ts_seq = []
             for i in range(self.seq_len):
                 # Process LEFT camera
                 idx_start_left = int(self.event_indices_dict['left'][start_frame + i])
@@ -313,8 +412,14 @@ class MVSECDataset(Dataset):
                 if self.calib_data is not None:
                     event_slice_left = self._undistort_events(event_slice_left, 'left')
 
-                t_start_left = self.event_timestamps_dict['left'][start_frame + i]
-                t_end_left = self.event_timestamps_dict['left'][start_frame + i + 1]
+                # Extract actual event timestamps for LEFT camera (CRITICAL for alignment with GT)
+                if event_slice_left.shape[0] > 0:
+                    t_start_left = event_slice_left[0, 2]
+                    t_end_left = event_slice_left[-1, 2]
+                else:
+                    t_start_left = self.event_timestamps_dict['left'][start_frame + i]
+                    t_end_left = self.event_timestamps_dict['left'][start_frame + i + 1]
+
                 grid_left = self.voxel_grid(event_slice_left, t_start=t_start_left, t_end=t_end_left)
                 voxel_seq_left.append(grid_left)
 
@@ -329,38 +434,88 @@ class MVSECDataset(Dataset):
                 if self.calib_data is not None:
                     event_slice_right = self._undistort_events(event_slice_right, 'right')
 
-                t_start_right = self.event_timestamps_dict['right'][start_frame + i]
-                t_end_right = self.event_timestamps_dict['right'][start_frame + i + 1]
+                # Extract actual event timestamps for RIGHT camera (CRITICAL for alignment with GT)
+                if event_slice_right.shape[0] > 0:
+                    t_start_right = event_slice_right[0, 2]
+                    t_end_right = event_slice_right[-1, 2]
+                else:
+                    t_start_right = self.event_timestamps_dict['right'][start_frame + i]
+                    t_end_right = self.event_timestamps_dict['right'][start_frame + i + 1]
+
                 grid_right = self.voxel_grid(event_slice_right, t_start=t_start_right, t_end=t_end_right)
                 voxel_seq_right.append(grid_right)
 
                 # Get pose (GT is from left camera frame)
+                # Use LEFT camera timestamps for both GT computation (consistent with voxel grid)
                 if event_slice_left.shape[0] > 0 or event_slice_right.shape[0] > 0:
                     if self.pose.ndim == 3 and self.pose.shape[1:] == (4, 4):
                         t0_idx = start_frame + i
                         t1_idx = start_frame + i + 1
                         delta = self._compute_relative_pose(t0_idx, t1_idx)
                     else:
-                        t0 = event_slice_left[0, 2] if event_slice_left.shape[0] > 0 else event_slice_right[0, 2]
-                        t1 = event_slice_left[-1, 2] if event_slice_left.shape[0] > 0 else event_slice_right[-1, 2]
-                        delta = self._compute_relative_pose(t0, t1)
+                        # Use LEFT camera event timestamps for pose delta (matches voxel grid)
+                        delta = self._compute_relative_pose(t_start_left, t_end_left)
                 else:
                     delta = np.zeros(6, dtype=np.float32)
 
                 pose_seq.append(torch.as_tensor(delta, dtype=torch.float32))
+
+                # IMU features for left camera (if available)
+                if 'left' in self.imu_sources:
+                    imu_ts_left, imu_meas_left = self.imu_sources['left']
+                    mask_l = (imu_ts_left >= t_start_left) & (imu_ts_left < t_end_left)
+                    slice_l = imu_meas_left[mask_l]
+                    if slice_l.size == 0:
+                        feat_l = np.zeros(12, dtype=np.float32)
+                        ts_l = np.array([0.0, 0.0], dtype=np.float64)
+                    else:
+                        mean_l = slice_l.mean(axis=0)
+                        std_l = slice_l.std(axis=0)
+                        feat_l = np.concatenate([mean_l, std_l]).astype(np.float32)
+                        ts_l = np.array([imu_ts_left[mask_l][0], imu_ts_left[mask_l][-1]], dtype=np.float64)
+                else:
+                    feat_l = np.zeros(12, dtype=np.float32)
+                    ts_l = np.array([0.0, 0.0], dtype=np.float64)
+
+                # IMU features for right camera (if available)
+                if 'right' in self.imu_sources:
+                    imu_ts_right, imu_meas_right = self.imu_sources['right']
+                    mask_r = (imu_ts_right >= t_start_right) & (imu_ts_right < t_end_right)
+                    slice_r = imu_meas_right[mask_r]
+                    if slice_r.size == 0:
+                        feat_r = np.zeros(12, dtype=np.float32)
+                        ts_r = np.array([0.0, 0.0], dtype=np.float64)
+                    else:
+                        mean_r = slice_r.mean(axis=0)
+                        std_r = slice_r.std(axis=0)
+                        feat_r = np.concatenate([mean_r, std_r]).astype(np.float32)
+                        ts_r = np.array([imu_ts_right[mask_r][0], imu_ts_right[mask_r][-1]], dtype=np.float64)
+                else:
+                    feat_r = np.zeros(12, dtype=np.float32)
+                    ts_r = np.array([0.0, 0.0], dtype=np.float64)
+
+                # Concatenate left/right features (24) and timestamps (4)
+                imu_feat = np.concatenate([feat_l, feat_r]).astype(np.float32)
+                imu_ts_step = np.concatenate([ts_l, ts_r]).astype(np.float32)
+
+                imu_feats_seq.append(torch.as_tensor(imu_feat, dtype=torch.float32))
+                imu_ts_seq.append(torch.as_tensor(imu_ts_step, dtype=torch.float32))
 
             # Concatenate left and right voxel grids along channel dimension
             voxel_seq_left = torch.stack(voxel_seq_left)  # (S, B, H, W)
             voxel_seq_right = torch.stack(voxel_seq_right)  # (S, B, H, W)
             voxel_seq = torch.cat([voxel_seq_left, voxel_seq_right], dim=1)  # (S, 2*B, H, W)
 
-            return voxel_seq, torch.stack(pose_seq)
+            # Stack imu features and imu timestamp vectors
+            return voxel_seq, torch.stack(imu_feats_seq), torch.stack(imu_ts_seq), torch.stack(pose_seq)
         else:
             # Single camera (left)
             cam = 'left'
             voxel_seq = []
             pose_seq = []
+            imu_seq = []
 
+            imu_ts_seq = []
             for i in range(self.seq_len):
                 idx_start = int(self.event_indices_dict[cam][start_frame + i])
                 idx_end = int(self.event_indices_dict[cam][start_frame + i + 1])
@@ -376,14 +531,39 @@ class MVSECDataset(Dataset):
                 if self.calib_data is not None:
                     event_slice = self._undistort_events(event_slice, cam)
 
-                # 3. Create Voxel Grid using frame time boundaries instead of event times
-                # This fixes the issue where all events have the same timestamp
-                t_start = self.event_timestamps_dict[cam][start_frame + i]
-                t_end = self.event_timestamps_dict[cam][start_frame + i + 1]
+                # 3. Extract actual event timestamps (CRITICAL for alignment with GT)
+                if event_slice.shape[0] > 0:
+                    t_start = event_slice[0, 2]   # First event timestamp
+                    t_end = event_slice[-1, 2]    # Last event timestamp
+                else:
+                    # Fallback to frame timestamps if no events
+                    t_start = self.event_timestamps_dict[cam][start_frame + i]
+                    t_end = self.event_timestamps_dict[cam][start_frame + i + 1]
+
                 grid = self.voxel_grid(event_slice, t_start=t_start, t_end=t_end)
                 voxel_seq.append(grid)
 
-                # 4. Get Pose Ground Truth
+                # 4. Get IMU features for this visual step (use 'left' source by default)
+                if 'left' in self.imu_sources:
+                    imu_ts_left, imu_meas_left = self.imu_sources['left']
+                    mask = (imu_ts_left >= t_start) & (imu_ts_left < t_end)
+                    slice_l = imu_meas_left[mask]
+                    if slice_l.size == 0:
+                        imu_feat = np.zeros(12, dtype=np.float32)
+                        ts_pair = np.array([0.0, 0.0], dtype=np.float64)
+                    else:
+                        mean = slice_l.mean(axis=0)
+                        std = slice_l.std(axis=0)
+                        imu_feat = np.concatenate([mean, std]).astype(np.float32)
+                        ts_pair = np.array([imu_ts_left[mask][0], imu_ts_left[mask][-1]], dtype=np.float64)
+                else:
+                    imu_feat = np.zeros(12, dtype=np.float32)
+                    ts_pair = np.array([0.0, 0.0], dtype=np.float64)
+
+                imu_seq.append(torch.as_tensor(imu_feat, dtype=torch.float32))
+                imu_ts_seq.append(torch.as_tensor(ts_pair.astype(np.float32), dtype=torch.float32))
+
+                # 5. Get Pose Ground Truth
                 if event_slice.shape[0] > 0:
                     # If the GT poses are stored as (N, 4, 4) matrices then
                     # these correspond to frame indices rather than continuous
@@ -394,15 +574,12 @@ class MVSECDataset(Dataset):
                         t1_idx = start_frame + i + 1
                         delta = self._compute_relative_pose(t0_idx, t1_idx)
                     else:
-                        # Access timestamps
-                        t0 = event_slice[0, 2]
-                        t1 = event_slice[-1, 2]
-
-                        # Compute pose delta using timestamps
-                        delta = self._compute_relative_pose(t0, t1)
+                        # Use event timestamps (already extracted above) for pose delta
+                        # This MUST match the timestamps used for voxel grid
+                        delta = self._compute_relative_pose(t_start, t_end)
                 else:
                     delta = np.zeros(6, dtype=np.float32)
 
                 pose_seq.append(torch.as_tensor(delta, dtype=torch.float32))
 
-            return torch.stack(voxel_seq), torch.stack(pose_seq)
+            return torch.stack(voxel_seq), torch.stack(imu_seq), torch.stack(imu_ts_seq), torch.stack(pose_seq)
