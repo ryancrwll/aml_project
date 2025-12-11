@@ -149,8 +149,11 @@ class MVSECDataset(Dataset):
             with h5py.File(gt_path, 'r') as f:
                 if 'davis' in f:
                     self.pose = np.array(f['davis']['left']['pose'])
+                    # Also load pose timestamps for proper temporal lookup
+                    self.pose_ts = np.array(f['davis']['left']['pose_ts'])
                 else:
                     self.pose = np.array(f['pose'])
+                    self.pose_ts = None  # fallback: no timestamps available
 
         except Exception as e:
             print(f"Error loading HDF5 files: {e}")
@@ -174,7 +177,12 @@ class MVSECDataset(Dataset):
         self.valid_indices = list(range(0, max(0, min_len - seq_len)))
 
     def _get_pose_at_time(self, timestamp):
-        """Finds and extracts the 7-DOF pose at a specific timestamp."""
+        """Finds and extracts the 7-DOF pose at a specific timestamp.
+
+        For 4x4 pose matrices, maps the timestamp to pose frame using relative
+        position within the event sequence. This handles cases where pose_ts and
+        event timestamps are in different time domains.
+        """
         # Handle Structured vs Unstructured Pose Data
         if self.pose.dtype.names:
             # Structured Array (access by field name)
@@ -187,15 +195,27 @@ class MVSECDataset(Dataset):
             q = np.array([target['qx'], target['qy'], target['qz'], target['qw']])
 
         elif self.pose.ndim == 3 and self.pose.shape[1:] == (4, 4):
-            # Since the array is (N, 4, 4), the first dimension is the index, not time.
-            # We must assume the timestamps are the frame indices 0 to N-1 for search.
-            times = np.arange(len(self.pose)) # Treat array indices as timestamps for search
+            # Pose array is (N, 4, 4) with associated timestamps in pose_ts.
+            # Map event timestamp to pose frame index using relative position
+            # within the event sequence (handles timestamp domain mismatches)
+            event_ts_min = self.event_timestamps_dict[self.cameras[0]][0]
+            event_ts_max = self.event_timestamps_dict[self.cameras[0]][-1]
+            event_ts_range = event_ts_max - event_ts_min
 
-            # NOTE: We are using event time (float) to search array indices (int), which is an approximation
+            # Compute relative position: 0 = start, 1 = end
+            if event_ts_range > 0:
+                rel_pos = (timestamp - event_ts_min) / event_ts_range
+            else:
+                rel_pos = 0.0
 
-            idx = int(timestamp) # Assuming timestamp is the frame index (e.g., 0, 1, 2)
+            # Clamp to [0, 1]
+            rel_pos = np.clip(rel_pos, 0.0, 1.0)
+
+            # Map to pose frame index
+            idx = int(np.round(rel_pos * (len(self.pose) - 1)))
             idx = np.clip(idx, 0, len(self.pose) - 1)
-            target = self.pose[idx] # Target is now a (4, 4) matrix
+
+            target = self.pose[idx]  # Target is now a (4, 4) matrix
 
             # Extract Translation (top-right 3x1 vector)
             p = target[:3, 3]
@@ -221,6 +241,7 @@ class MVSECDataset(Dataset):
             raise ValueError(f"Unsupported pose array shape {self.pose.shape} for loading.")
 
         return p, q
+
 
     def _compute_relative_pose(self, t_start, t_end):
         """
@@ -405,20 +426,22 @@ class MVSECDataset(Dataset):
                 idx_start_left = int(self.event_indices_dict['left'][start_frame + i])
                 idx_end_left = int(self.event_indices_dict['left'][start_frame + i + 1])
                 event_slice_left = self.events_dict['left'][idx_start_left:idx_end_left]
+
+                # CRITICAL: Extract timestamps BEFORE dtype conversion to avoid precision loss
+                if event_slice_left.shape[0] > 0:
+                    t_start_left = float(event_slice_left[0, 2])
+                    t_end_left = float(event_slice_left[-1, 2])
+                else:
+                    t_start_left = self.event_timestamps_dict['left'][start_frame + i]
+                    t_end_left = self.event_timestamps_dict['left'][start_frame + i + 1]
+
+                # Now safe to convert to float32 for voxel grid (timestamps already extracted)
                 if event_slice_left.dtype != np.float32:
                     event_slice_left = event_slice_left.astype(np.float32)
 
                 # Apply undistortion if calibration available
                 if self.calib_data is not None:
                     event_slice_left = self._undistort_events(event_slice_left, 'left')
-
-                # Extract actual event timestamps for LEFT camera (CRITICAL for alignment with GT)
-                if event_slice_left.shape[0] > 0:
-                    t_start_left = event_slice_left[0, 2]
-                    t_end_left = event_slice_left[-1, 2]
-                else:
-                    t_start_left = self.event_timestamps_dict['left'][start_frame + i]
-                    t_end_left = self.event_timestamps_dict['left'][start_frame + i + 1]
 
                 grid_left = self.voxel_grid(event_slice_left, t_start=t_start_left, t_end=t_end_left)
                 voxel_seq_left.append(grid_left)
@@ -427,6 +450,16 @@ class MVSECDataset(Dataset):
                 idx_start_right = int(self.event_indices_dict['right'][start_frame + i])
                 idx_end_right = int(self.event_indices_dict['right'][start_frame + i + 1])
                 event_slice_right = self.events_dict['right'][idx_start_right:idx_end_right]
+
+                # CRITICAL: Extract timestamps BEFORE dtype conversion to avoid precision loss
+                if event_slice_right.shape[0] > 0:
+                    t_start_right = float(event_slice_right[0, 2])
+                    t_end_right = float(event_slice_right[-1, 2])
+                else:
+                    t_start_right = self.event_timestamps_dict['right'][start_frame + i]
+                    t_end_right = self.event_timestamps_dict['right'][start_frame + i + 1]
+
+                # Now safe to convert to float32 for voxel grid (timestamps already extracted)
                 if event_slice_right.dtype != np.float32:
                     event_slice_right = event_slice_right.astype(np.float32)
 
@@ -434,27 +467,14 @@ class MVSECDataset(Dataset):
                 if self.calib_data is not None:
                     event_slice_right = self._undistort_events(event_slice_right, 'right')
 
-                # Extract actual event timestamps for RIGHT camera (CRITICAL for alignment with GT)
-                if event_slice_right.shape[0] > 0:
-                    t_start_right = event_slice_right[0, 2]
-                    t_end_right = event_slice_right[-1, 2]
-                else:
-                    t_start_right = self.event_timestamps_dict['right'][start_frame + i]
-                    t_end_right = self.event_timestamps_dict['right'][start_frame + i + 1]
-
                 grid_right = self.voxel_grid(event_slice_right, t_start=t_start_right, t_end=t_end_right)
                 voxel_seq_right.append(grid_right)
 
                 # Get pose (GT is from left camera frame)
                 # Use LEFT camera timestamps for both GT computation (consistent with voxel grid)
                 if event_slice_left.shape[0] > 0 or event_slice_right.shape[0] > 0:
-                    if self.pose.ndim == 3 and self.pose.shape[1:] == (4, 4):
-                        t0_idx = start_frame + i
-                        t1_idx = start_frame + i + 1
-                        delta = self._compute_relative_pose(t0_idx, t1_idx)
-                    else:
-                        # Use LEFT camera event timestamps for pose delta (matches voxel grid)
-                        delta = self._compute_relative_pose(t_start_left, t_end_left)
+                    # Always use actual event timestamps for pose lookup
+                    delta = self._compute_relative_pose(t_start_left, t_end_left)
                 else:
                     delta = np.zeros(6, dtype=np.float32)
 
@@ -497,7 +517,6 @@ class MVSECDataset(Dataset):
                 # Concatenate left/right features (24) and timestamps (4)
                 imu_feat = np.concatenate([feat_l, feat_r]).astype(np.float32)
                 imu_ts_step = np.concatenate([ts_l, ts_r]).astype(np.float32)
-
                 imu_feats_seq.append(torch.as_tensor(imu_feat, dtype=torch.float32))
                 imu_ts_seq.append(torch.as_tensor(imu_ts_step, dtype=torch.float32))
 

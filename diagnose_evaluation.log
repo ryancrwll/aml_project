@@ -1,0 +1,75 @@
+Using checkpoint: ./checkpoints/vo_model_ep30.pth
+
+====================================================================================================
+EVALUATION DIAGNOSTIC
+====================================================================================================
+
+
+Testing flying1:
+----------------------------------------------------------------------------------------------------
+Per-frame statistics (3000 frames):
+  Translation error - RMSE: 0.000503m, MAE: 0.000368m
+  Rotation error - RMSE: 0.001702 rad, MAE: 0.001292 rad
+  Translation range: [0.000019, 0.001916] m
+  Rotation range: [0.000095, 0.007545] rad
+
+Trajectory error (UNALIGNED):
+  RMSE: 0.042248m
+  MAE: 0.024549m
+
+Trajectory error (ALIGNED with scale=5.1418):
+  RMSE: 0.023443m
+  MAE: 0.015411m
+
+Step magnitude analysis:
+  Pred steps - mean: 0.000007m, std: 0.000000m
+  GT steps - mean: 0.000368m, std: 0.000342m
+  Ratio (pred/gt): 0.0179
+
+
+Testing flying3:
+----------------------------------------------------------------------------------------------------
+Per-frame statistics (3000 frames):
+  Translation error - RMSE: 0.000159m, MAE: 0.000092m
+  Rotation error - RMSE: 0.000678 rad, MAE: 0.000540 rad
+  Translation range: [0.000003, 0.000914] m
+  Rotation range: [0.000025, 0.003554] rad
+
+Trajectory error (UNALIGNED):
+  RMSE: 0.013210m
+  MAE: 0.011664m
+
+Trajectory error (ALIGNED with scale=0.0228):
+  RMSE: 0.002781m
+  MAE: 0.002429m
+
+Step magnitude analysis:
+  Pred steps - mean: 0.000007m, std: 0.000000m
+  GT steps - mean: 0.000092m, std: 0.000130m
+  Ratio (pred/gt): 0.0716
+
+
+Testing flying4:
+----------------------------------------------------------------------------------------------------
+Per-frame statistics (3000 frames):
+  Translation error - RMSE: 0.000107m, MAE: 0.000075m
+  Rotation error - RMSE: 0.000509 rad, MAE: 0.000474 rad
+  Translation range: [0.000006, 0.000513] m
+  Rotation range: [0.000045, 0.001747] rad
+
+Trajectory error (UNALIGNED):
+  RMSE: 0.013420m
+  MAE: 0.011768m
+
+Trajectory error (ALIGNED with scale=0.2110):
+  RMSE: 0.001078m
+  MAE: 0.000993m
+
+Step magnitude analysis:
+  Pred steps - mean: 0.000007m, std: 0.000000m
+  GT steps - mean: 0.000075m, std: 0.000076m
+  Ratio (pred/gt): 0.0879
+
+====================================================================================================
+DIAGNOSTIC COMPLETE
+====================================================================================================

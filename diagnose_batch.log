@@ -1,0 +1,48 @@
+Using checkpoint: ./checkpoints/vo_model_1train_2val_best.pth
+Dataset size: 2196
+Batch shapes: torch.Size([4, 10, 10, 260, 346]) torch.Size([4, 10, 24]) torch.Size([4, 10, 4]) torch.Size([4, 10, 6])
+Loaded checkpoint
+Preds shape: torch.Size([4, 10, 6])
+Preds stats: mean/std/min/max: -0.05236893892288208 0.5181955099105835 -1.1015393733978271 0.720271110534668
+Targets stats (unscaled): mean/std/min/max: 9.209828931489028e-06 0.0005097027169540524 -0.002817300381138921 0.002392758149653673
+Loss components: loss_t, loss_r, total: 0.2775524854660034 9.747533113113604e-06 0.28047674894332886
+grad cnn.0.weight: norm=0.000000
+grad cnn.0.bias: norm=0.000089
+grad cnn.1.weight: norm=0.000000
+grad cnn.1.bias: norm=0.005864
+grad cnn.3.weight: norm=0.001190
+grad cnn.3.bias: norm=0.000003
+grad cnn.4.weight: norm=0.000036
+grad cnn.4.bias: norm=0.000390
+grad cnn.6.weight: norm=0.001279
+grad cnn.6.bias: norm=0.000000
+grad cnn.7.weight: norm=0.000061
+grad cnn.7.bias: norm=0.000020
+grad cnn.9.weight: norm=0.002792
+grad cnn.9.bias: norm=0.000000
+grad cnn.10.weight: norm=0.000156
+grad cnn.10.bias: norm=0.000085
+grad cnn.12.weight: norm=0.011258
+grad cnn.12.bias: norm=0.000000
+grad cnn.13.weight: norm=0.006868
+grad cnn.13.bias: norm=0.009483
+grad imu_encoder.0.weight: norm=0.000000
+grad imu_encoder.0.bias: norm=0.002397
+grad imu_encoder.2.weight: norm=0.003704
+grad imu_encoder.2.bias: norm=0.007172
+grad rnn.weight_ih_l0: norm=0.142385
+grad rnn.weight_hh_l0: norm=0.054918
+grad rnn.bias_ih_l0: norm=0.015188
+grad rnn.bias_hh_l0: norm=0.007029
+grad rnn.weight_ih_l1: norm=0.562403
+grad rnn.weight_hh_l1: norm=0.205081
+grad rnn.bias_ih_l1: norm=0.062534
+grad rnn.bias_hh_l1: norm=0.032113
+grad fc.0.weight: norm=1.305382
+grad fc.0.bias: norm=0.186603
+grad fc.2.weight: norm=2.350460
+grad fc.2.bias: norm=0.567511
+Mean grad norm: 0.15401264995222347 Max grad norm: 2.3504600524902344
+Param delta stats: mean/min/max: 0.012757039782671755 3.2854948130989214e-06 0.09973552078008652
+
+Done diagnostic

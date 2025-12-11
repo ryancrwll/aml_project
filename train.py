@@ -15,8 +15,7 @@ from VOnetwork import VONet
 import argparse
 
 TRAIN_DATASETS = [
-    {'data': './data/indoor_flying1_data.hdf5', 'gt': './data/indoor_flying1_gt.hdf5'},
-    {'data': './data/indoor_flying2_data.hdf5', 'gt': './data/indoor_flying2_gt.hdf5'},
+    {'data': './data/indoor_flying1_data.hdf5', 'gt': './data/indoor_flying2_gt.hdf5'},
     {'data': './data/indoor_flying3_data.hdf5', 'gt': './data/indoor_flying3_gt.hdf5'},
     {'data': './data/indoor_flying4_data.hdf5', 'gt': './data/indoor_flying4_gt.hdf5'}
 ]
@@ -29,8 +28,8 @@ LR = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
-ROT_WEIGHT = 300.0
-TRANS_SCALE_FACTOR = 1000.0
+ROT_WEIGHT = 50.0
+TRANS_SCALE_FACTOR = 7.5
 
 GRAD_CLIP_VALUE = 1.0 # Standard value for gradient clipping
 
