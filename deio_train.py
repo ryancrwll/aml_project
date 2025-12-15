@@ -18,7 +18,7 @@ TRAIN_DATASETS = [
     {'data': './data/indoor_flying3_data.hdf5', 'gt': './data/indoor_flying3_gt.hdf5'},
     {'data': './data/indoor_flying4_data.hdf5', 'gt': './data/indoor_flying4_gt.hdf5'}
 ]
-
+USE_IMU_DATA = True
 BATCH_SIZE = 4
 SEQ_LEN = 10
 EPOCHS = 30
@@ -26,7 +26,7 @@ LR = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
-USE_STEREO = False
+USE_STEREO = True
 USE_CALIB = True
 CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'
 
@@ -35,9 +35,9 @@ IMU_RAW_STATE_DIM = 6
 GT_FULL_STATE_DIM = 16
 
 # DEIO Hyperparameters
-EVENT_WEIGHT = 100.0
-IMU_WEIGHT = 1.0
-PRIOR_WEIGHT = 0.1
+EVENT_WEIGHT = 100.0 #Make sure the 3D map you are building aligns with the event pixels you see
+GT_WEIGHT = 1.0 #Be in the exact right spot (x,y,z) at the exact right time
+PRIOR_WEIGHT = 0.1 #Don't jump around wildly
 HUBER_DELTA = 0.1
 GRAD_CLIP_VALUE = 1.0
 CHECKPOINT_DIR = './checkpoints'
@@ -80,12 +80,16 @@ def train():
 
     # 2. Model Setup
     input_channels = VOXEL_PARAMS['B'] * 2 if USE_STEREO else VOXEL_PARAMS['B']
-    model = DEIONet(input_channels=input_channels, imu_state_dim=IMU_RAW_STATE_DIM).to(DEVICE)
+    model = DEIONet(
+        input_channels=input_channels,
+        imu_state_dim=IMU_RAW_STATE_DIM,
+        use_imu=USE_IMU_DATA
+    ).to(DEVICE)
     dba_layer = DifferentiableBundleAdjustment(state_dim=GT_FULL_STATE_DIM, seq_len=SEQ_LEN,
                                                dba_param_dim=model.dba_param_dim).to(DEVICE)
 
     optimizer = optim.Adam(model.parameters(), lr=LR)
-    criterion = DEIOCost(imu_residual_weight=IMU_WEIGHT, event_residual_weight=EVENT_WEIGHT,
+    criterion = DEIOCost(imu_residual_weight=GT_WEIGHT, event_residual_weight=EVENT_WEIGHT,
                          prior_residual_weight=PRIOR_WEIGHT, huber_delta=HUBER_DELTA)
 
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -109,8 +113,8 @@ def train():
             optimized_state = dba_layer(dba_params, imu_raw_state, gt_full_state)
 
             loss, imu_cost, event_cost, prior_cost = criterion(
-                optimized_state, imu_raw_state, dba_params, gt_full_state
-            )
+                optimized_state, imu_raw_state, dba_params, gt_full_state, use_imu=USE_IMU_DATA
+                )
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_VALUE)

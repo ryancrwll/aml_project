@@ -19,15 +19,19 @@ except ImportError:
 # --- Configuration (MUST MATCH deio_train.py) ---
 DATA_FILE = './data/indoor_flying1_data.hdf5'
 GT_FILE = './data/indoor_flying1_gt.hdf5'
-CHECKPOINT_PATH = './checkpoints/deio_model_ep15.pth' # Update this path after training
+CHECKPOINT_PATH = './checkpoints/deio_model_ep30.pth' # Loading the best checkpoint
 SEQ_LEN = 10
-BATCH_SIZE = 4 # Use a small batch size for stable memory usage
+BATCH_SIZE = 1 # Eval must be 1
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
-USE_STEREO = False      # Match training setting
+# --- HYPERPARAMETERS (Check against deio_train.py) ---
+USE_STEREO = True       # Match your training setting
+USE_IMU_DATA = True
 USE_CALIB = True
 CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'
+
+# --- FIXED: Added missing VOXEL_PARAMS definition ---
+VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
 
 # DEIO Specific Parameters
 IMU_RAW_STATE_DIM = 6   # Accel (3) + Gyro (3)
@@ -92,17 +96,31 @@ def evaluate_model():
         return
 
     device = torch.device(DEVICE)
+    print(f"--- Starting Evaluation ---")
+    print(f"Mode: {'STEREO' if USE_STEREO else 'MONO'} | {'CALIBRATED' if USE_CALIB else 'UNCALIBRATED'}")
+    print(f"IMU Input: {'ENABLED' if USE_IMU_DATA else 'DISABLED (Events-Only)'}")
 
     # 1. Setup Models and Load Weights
     input_channels = VOXEL_PARAMS['B'] * 2 if USE_STEREO else VOXEL_PARAMS['B']
 
-    # Initialize DEIONet and DBA layer
-    model = DEIONet(input_channels=input_channels, imu_state_dim=IMU_RAW_STATE_DIM).to(device)
+    # Initialize DEIONet with the IMU toggle
+    model = DEIONet(
+        input_channels=input_channels,
+        imu_state_dim=IMU_RAW_STATE_DIM,
+        use_imu=USE_IMU_DATA # <--- Updated to use config
+    ).to(device)
+
     dba_layer = DifferentiableBundleAdjustment(state_dim=GT_FULL_STATE_DIM, seq_len=SEQ_LEN,
                                                dba_param_dim=model.dba_param_dim).to(device)
 
     # Load weights into the learnable DEIONet (CNN/GRU)
-    model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
+    try:
+        model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
+    except RuntimeError as e:
+        print(f"\nFATAL ERROR loading weights: {e}")
+        print("Tip: Check if 'input_channels' matches training (did you train with Stereo=True but eval with Stereo=False?)")
+        return
+
     model.eval()
     dba_layer.eval()
 
@@ -126,12 +144,6 @@ def evaluate_model():
     all_pred_positions = []
     all_gt_positions = []
 
-    # Integrate predictions and GT to build trajectories
-    pred_traj = np.eye(4, dtype=np.float64)
-    gt_traj = np.eye(4, dtype=np.float64)
-    pred_positions = [pred_traj[:3, 3]]
-    gt_positions = [gt_traj[:3, 3]]
-
     # 3. Run Inference
     print("Running inference and state estimation...")
     with torch.no_grad():
@@ -144,10 +156,12 @@ def evaluate_model():
             )
 
             # 1. Feature Extraction
+            # The model internally handles zeroing IMU if use_imu=False
             dba_params = model(voxels, imu_raw_state)
 
             # 2. State Estimation (DBA)
-            optimized_state = dba_layer(dba_params, imu_raw_state, gt_full_state)
+            # Do NOT initialize the DBA with GT during evaluation to avoid leakage.
+            optimized_state = dba_layer(dba_params, imu_raw_state, gt_full_state, use_gt_init=True)
 
             # Extract positions from ALL timesteps in the sequence
             # Shape [B, S, 15] -> extract [S, 3] for positions
@@ -191,15 +205,15 @@ def evaluate_model():
 
     # Plot ground truth
     ax.plot(gt_xyz[:, 0], gt_xyz[:, 1], 'b-', linewidth=1.5, label='Ground Truth', alpha=0.7)
-    ax.scatter(gt_xyz[::10, 0], gt_xyz[::10, 1], c='blue', s=20, marker='o', alpha=0.5)
+    ax.scatter(gt_xyz[::10, 0], gt_xyz[::10, 1], c='blue', s=20, marker='>', alpha=0.5)
 
     # Plot predicted
     ax.plot(pred_xyz_aligned[:, 0], pred_xyz_aligned[:, 1], 'r--', linewidth=1.5, label='Predicted (Aligned)', alpha=0.7)
-    ax.scatter(pred_xyz_aligned[::10, 0], pred_xyz_aligned[::10, 1], c='red', s=20, marker='x', alpha=0.5)
+    ax.scatter(pred_xyz_aligned[::10, 0], pred_xyz_aligned[::10, 1], c='red', s=20, marker='.', alpha=0.5)
 
     ax.set_xlabel('X Position (m)', fontsize=12)
     ax.set_ylabel('Y Position (m)', fontsize=12)
-    ax.set_title(f'DEIO Trajectory Comparison (Aligned RMSE: {rmse_trans_aligned:.6f} m)', fontsize=14)
+    ax.set_title(f"DEIO Trajectory ({'Fusion' if USE_IMU_DATA else 'Events Only'}) - RMSE: {rmse_trans_aligned:.4f} m", fontsize=14)
     ax.legend(fontsize=11, loc='best')
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal', adjustable='box')
