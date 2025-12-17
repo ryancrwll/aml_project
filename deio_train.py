@@ -18,7 +18,7 @@ TRAIN_DATASETS = [
     {'data': './data/indoor_flying3_data.hdf5', 'gt': './data/indoor_flying3_gt.hdf5'},
     {'data': './data/indoor_flying4_data.hdf5', 'gt': './data/indoor_flying4_gt.hdf5'}
 ]
-USE_IMU_DATA = True
+USE_IMU_DATA = False
 BATCH_SIZE = 4
 SEQ_LEN = 10
 EPOCHS = 30
@@ -26,8 +26,8 @@ LR = 1e-4
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
-USE_STEREO = True
-USE_CALIB = True
+USE_STEREO = False
+USE_CALIB = False
 CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'
 
 # DEIO Specific Parameters

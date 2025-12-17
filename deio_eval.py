@@ -19,15 +19,15 @@ except ImportError:
 # --- Configuration (MUST MATCH deio_train.py) ---
 DATA_FILE = './data/indoor_flying1_data.hdf5'
 GT_FILE = './data/indoor_flying1_gt.hdf5'
-CHECKPOINT_PATH = './checkpoints/deio_model_ep30.pth' # Loading the best checkpoint
+CHECKPOINT_PATH = './checkpoints/Mono_noCalib_noIMU.pth' # Loading the best checkpoint
 SEQ_LEN = 10
 BATCH_SIZE = 1 # Eval must be 1
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # --- HYPERPARAMETERS (Check against deio_train.py) ---
-USE_STEREO = True       # Match your training setting
-USE_IMU_DATA = True
-USE_CALIB = True
+USE_STEREO = False       # Match your training setting
+USE_IMU_DATA = False
+USE_CALIB = False
 CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'
 
 # --- FIXED: Added missing VOXEL_PARAMS definition ---
@@ -160,8 +160,7 @@ def evaluate_model():
             dba_params = model(voxels, imu_raw_state)
 
             # 2. State Estimation (DBA)
-            # Do NOT initialize the DBA with GT during evaluation to avoid leakage.
-            optimized_state = dba_layer(dba_params, imu_raw_state, gt_full_state, use_gt_init=True)
+            optimized_state = dba_layer(dba_params, imu_raw_state, gt_full_state)
 
             # Extract positions from ALL timesteps in the sequence
             # Shape [B, S, 15] -> extract [S, 3] for positions
