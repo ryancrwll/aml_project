@@ -1,10 +1,9 @@
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from scipy.spatial.transform import Rotation as R
 from convert_events import VoxelGrid
-import sys
 import yaml
 import cv2
 
@@ -168,11 +167,7 @@ class MVSECDataset(Dataset):
             self._build_undistortion_maps()
 
         # Calculate how many full sequences we can make. When using multiple cameras
-        # (stereo) use the minimum number of event-index entries across cameras so
-        # we don't generate start indices that are valid for one camera but exceed
-        # the other's length (which caused IndexError in DataLoader workers).
         min_len = min(len(self.event_indices_dict[cam]) for cam in self.cameras)
-        # valid start_frame values must satisfy start_frame + seq_len <= min_len - 1
         # which yields start_frame <= min_len - seq_len - 1, so range end is min_len - seq_len
         self.valid_indices = list(range(0, max(0, min_len - seq_len)))
 
@@ -208,19 +203,16 @@ class MVSECDataset(Dataset):
             else:
                 rel_pos = 0.0
 
-            # Clamp to [0, 1]
             rel_pos = np.clip(rel_pos, 0.0, 1.0)
 
             # Map to pose frame index
             idx = int(np.round(rel_pos * (len(self.pose) - 1)))
             idx = np.clip(idx, 0, len(self.pose) - 1)
 
-            target = self.pose[idx]  # Target is now a (4, 4) matrix
+            target = self.pose[idx]
 
-            # Extract Translation (top-right 3x1 vector)
             p = target[:3, 3]
 
-            # Extract Rotation Matrix (top-left 3x3 matrix)
             R_matrix = target[:3, :3]
 
             # Convert Rotation Matrix to Quaternion (qx, qy, qz, qw)
@@ -293,15 +285,12 @@ class MVSECDataset(Dataset):
                 if K.size == 0 or D.size == 0 or resolution == (0, 0):
                     continue
 
-                # Build intrinsic matrix
                 K_matrix = np.array([
                     [K[0], 0, K[2]],
                     [0, K[1], K[3]],
                     [0, 0, 1]
                 ], dtype=np.float32)
 
-                # Compute undistortion maps using OpenCV
-                # This handles equidistant and other distortion models
                 map_x, map_y = cv2.initUndistortRectifyMap(
                     K_matrix,
                     D,
@@ -427,7 +416,6 @@ class MVSECDataset(Dataset):
                 idx_end_left = int(self.event_indices_dict['left'][start_frame + i + 1])
                 event_slice_left = self.events_dict['left'][idx_start_left:idx_end_left]
 
-                # CRITICAL: Extract timestamps BEFORE dtype conversion to avoid precision loss
                 if event_slice_left.shape[0] > 0:
                     t_start_left = float(event_slice_left[0, 2])
                     t_end_left = float(event_slice_left[-1, 2])
@@ -435,7 +423,6 @@ class MVSECDataset(Dataset):
                     t_start_left = self.event_timestamps_dict['left'][start_frame + i]
                     t_end_left = self.event_timestamps_dict['left'][start_frame + i + 1]
 
-                # Now safe to convert to float32 for voxel grid (timestamps already extracted)
                 if event_slice_left.dtype != np.float32:
                     event_slice_left = event_slice_left.astype(np.float32)
 
@@ -451,7 +438,6 @@ class MVSECDataset(Dataset):
                 idx_end_right = int(self.event_indices_dict['right'][start_frame + i + 1])
                 event_slice_right = self.events_dict['right'][idx_start_right:idx_end_right]
 
-                # CRITICAL: Extract timestamps BEFORE dtype conversion to avoid precision loss
                 if event_slice_right.shape[0] > 0:
                     t_start_right = float(event_slice_right[0, 2])
                     t_end_right = float(event_slice_right[-1, 2])
@@ -470,8 +456,6 @@ class MVSECDataset(Dataset):
                 grid_right = self.voxel_grid(event_slice_right, t_start=t_start_right, t_end=t_end_right)
                 voxel_seq_right.append(grid_right)
 
-                # Get pose (GT is from left camera frame)
-                # Use LEFT camera timestamps for both GT computation (consistent with voxel grid)
                 if event_slice_left.shape[0] > 0 or event_slice_right.shape[0] > 0:
                     # Always use actual event timestamps for pose lookup
                     delta = self._compute_relative_pose(t_start_left, t_end_left)
@@ -480,7 +464,6 @@ class MVSECDataset(Dataset):
 
                 pose_seq.append(torch.as_tensor(delta, dtype=torch.float32))
 
-                # IMU features for left camera (if available)
                 if 'left' in self.imu_sources:
                     imu_ts_left, imu_meas_left = self.imu_sources['left']
                     mask_l = (imu_ts_left >= t_start_left) & (imu_ts_left < t_end_left)
@@ -497,7 +480,6 @@ class MVSECDataset(Dataset):
                     feat_l = np.zeros(12, dtype=np.float32)
                     ts_l = np.array([0.0, 0.0], dtype=np.float64)
 
-                # IMU features for right camera (if available)
                 if 'right' in self.imu_sources:
                     imu_ts_right, imu_meas_right = self.imu_sources['right']
                     mask_r = (imu_ts_right >= t_start_right) & (imu_ts_right < t_end_right)
@@ -539,10 +521,8 @@ class MVSECDataset(Dataset):
                 idx_start = int(self.event_indices_dict[cam][start_frame + i])
                 idx_end = int(self.event_indices_dict[cam][start_frame + i + 1])
 
-                # 2. Slice Events
                 event_slice = self.events_dict[cam][idx_start:idx_end]
 
-                # FIX: Force the slice to be a clean float array immediately
                 if event_slice.dtype != np.float32:
                      event_slice = event_slice.astype(np.float32)
 
@@ -550,7 +530,6 @@ class MVSECDataset(Dataset):
                 if self.calib_data is not None:
                     event_slice = self._undistort_events(event_slice, cam)
 
-                # 3. Extract actual event timestamps (CRITICAL for alignment with GT)
                 if event_slice.shape[0] > 0:
                     t_start = event_slice[0, 2]   # First event timestamp
                     t_end = event_slice[-1, 2]    # Last event timestamp
@@ -562,7 +541,6 @@ class MVSECDataset(Dataset):
                 grid = self.voxel_grid(event_slice, t_start=t_start, t_end=t_end)
                 voxel_seq.append(grid)
 
-                # 4. Get IMU features for this visual step (use 'left' source by default)
                 if 'left' in self.imu_sources:
                     imu_ts_left, imu_meas_left = self.imu_sources['left']
                     mask = (imu_ts_left >= t_start) & (imu_ts_left < t_end)
@@ -582,19 +560,13 @@ class MVSECDataset(Dataset):
                 imu_seq.append(torch.as_tensor(imu_feat, dtype=torch.float32))
                 imu_ts_seq.append(torch.as_tensor(ts_pair.astype(np.float32), dtype=torch.float32))
 
-                # 5. Get Pose Ground Truth
                 if event_slice.shape[0] > 0:
-                    # If the GT poses are stored as (N, 4, 4) matrices then
-                    # these correspond to frame indices rather than continuous
-                    # timestamps. In that case use the sequence frame indices
-                    # (derived from start_frame) to index into the pose array.
                     if self.pose.ndim == 3 and self.pose.shape[1:] == (4, 4):
                         t0_idx = start_frame + i
                         t1_idx = start_frame + i + 1
                         delta = self._compute_relative_pose(t0_idx, t1_idx)
                     else:
                         # Use event timestamps (already extracted above) for pose delta
-                        # This MUST match the timestamps used for voxel grid
                         delta = self._compute_relative_pose(t_start, t_end)
                 else:
                     delta = np.zeros(6, dtype=np.float32)

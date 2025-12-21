@@ -6,7 +6,6 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import sys
-import argparse
 
 # Import new DEIO modules
 try:
@@ -30,14 +29,11 @@ USE_IMU_DATA = False
 USE_CALIB = False
 CALIB_PATH = './data/indoor_flying_calib/camchain-imucam-indoor_flying.yaml'
 
-# --- FIXED: Added missing VOXEL_PARAMS definition ---
 VOXEL_PARAMS = {'H': 260, 'W': 346, 'B': 5}
 
 # DEIO Specific Parameters
 IMU_RAW_STATE_DIM = 6   # Accel (3) + Gyro (3)
 GT_FULL_STATE_DIM = 16  # P(3), Q(4), V(3), Ba(3), Bg(3) = 16 total
-
-# --- Helper Functions (From original main.py, adapted) ---
 
 def extract_position_from_state(state_vector):
     """
@@ -89,7 +85,6 @@ def align_trajectories_umeyama(pred_xyz, gt_xyz):
     return pred_aligned, c, R_matrix, t
 
 # --- Evaluation Function ---
-
 def evaluate_model():
     if not os.path.exists(CHECKPOINT_PATH):
         print(f"ERROR: Checkpoint not found at {CHECKPOINT_PATH}. Please train the DEIO model first.")
@@ -100,7 +95,6 @@ def evaluate_model():
     print(f"Mode: {'STEREO' if USE_STEREO else 'MONO'} | {'CALIBRATED' if USE_CALIB else 'UNCALIBRATED'}")
     print(f"IMU Input: {'ENABLED' if USE_IMU_DATA else 'DISABLED (Events-Only)'}")
 
-    # 1. Setup Models and Load Weights
     input_channels = VOXEL_PARAMS['B'] * 2 if USE_STEREO else VOXEL_PARAMS['B']
 
     # Initialize DEIONet with the IMU toggle
@@ -126,7 +120,6 @@ def evaluate_model():
 
     print(f"DEIO Model loaded from {CHECKPOINT_PATH}. Channels: {input_channels}")
 
-    # 2. Setup Data
     test_dataset = DEIODataset(
         data_path=DATA_FILE,
         gt_path=GT_FILE,
@@ -144,7 +137,6 @@ def evaluate_model():
     all_pred_positions = []
     all_gt_positions = []
 
-    # 3. Run Inference
     print("Running inference and state estimation...")
     with torch.no_grad():
         for voxels, imu_raw_state, gt_full_state in tqdm(test_loader):
@@ -155,11 +147,9 @@ def evaluate_model():
                 voxels.to(device), imu_raw_state.to(device), gt_full_state.to(device)
             )
 
-            # 1. Feature Extraction
             # The model internally handles zeroing IMU if use_imu=False
             dba_params = model(voxels, imu_raw_state)
 
-            # 2. State Estimation (DBA)
             optimized_state = dba_layer(dba_params, imu_raw_state, gt_full_state)
 
             # Extract positions from ALL timesteps in the sequence
@@ -180,7 +170,6 @@ def evaluate_model():
     pred_xyz_unaligned = np.array(all_pred_positions, dtype=np.float32)
     gt_xyz = np.array(all_gt_positions, dtype=np.float32)
 
-    # 4. Trajectory Alignment and Metric Calculation
     print("Aligning trajectories...")
     # align_trajectories_umeyama expects (predicted, ground_truth) order
     pred_xyz_aligned, scale, R_matrix, t = align_trajectories_umeyama(pred_xyz_unaligned.astype(np.float64), gt_xyz.astype(np.float64))
@@ -195,7 +184,6 @@ def evaluate_model():
     print(f"Sim(3) Scale Factor: {scale:.4f}")
     print(f"Trajectory RMSE (ALIGNED): {rmse_trans_aligned:.4f} meters")
 
-    # 5. Visualization
     print("\nGenerating plot...")
     print(f"GT shape: {gt_xyz.shape}, min: {gt_xyz.min(axis=0)}, max: {gt_xyz.max(axis=0)}")
     print(f"Pred aligned shape: {pred_xyz_aligned.shape}, min: {pred_xyz_aligned.min(axis=0)}, max: {pred_xyz_aligned.max(axis=0)}")

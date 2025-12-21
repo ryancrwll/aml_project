@@ -3,9 +3,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 import os
-import argparse
-import sys
-import time
 
 # Import new modules
 from vo_deio_net import DEIONet, DifferentiableBundleAdjustment
@@ -35,9 +32,9 @@ IMU_RAW_STATE_DIM = 6
 GT_FULL_STATE_DIM = 16
 
 # DEIO Hyperparameters
-EVENT_WEIGHT = 100.0 #Make sure the 3D map you are building aligns with the event pixels you see
-GT_WEIGHT = 1.0 #Be in the exact right spot (x,y,z) at the exact right time
-PRIOR_WEIGHT = 0.1 #Don't jump around wildly
+EVENT_WEIGHT = 100.0
+GT_WEIGHT = 1.0
+PRIOR_WEIGHT = 0.1
 HUBER_DELTA = 0.1
 GRAD_CLIP_VALUE = 1.0
 CHECKPOINT_DIR = './checkpoints'
@@ -45,8 +42,6 @@ CHECKPOINT_DIR = './checkpoints'
 def train():
     print(f"Starting DEIO training on {DEVICE}")
 
-    # 1. Load Datasets
-    # (Dataset loading logic remains the same)
     datasets = []
     for paths in TRAIN_DATASETS:
         d_path = paths['data']
@@ -78,7 +73,6 @@ def train():
     loader = DataLoader(combined_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
     print(f"Total training sequences: {len(combined_dataset)}")
 
-    # 2. Model Setup
     input_channels = VOXEL_PARAMS['B'] * 2 if USE_STEREO else VOXEL_PARAMS['B']
     model = DEIONet(
         input_channels=input_channels,
@@ -95,7 +89,6 @@ def train():
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     print(f"Checkpoints will be saved to: {CHECKPOINT_DIR}")
 
-    # 3. Training Loop
     for epoch in range(EPOCHS):
         model.train()
         total_loss = 0
@@ -130,10 +123,8 @@ def train():
         avg_loss = total_loss / len(loader)
         print(f"Epoch {epoch+1} Average Loss: {avg_loss:.8f}")
 
-        # --- CHECKPOINTING LOGIC ---
         if (epoch + 1) % 5 == 0 or epoch == EPOCHS - 1:
             checkpoint_path = os.path.join(CHECKPOINT_DIR, f'deio_model_ep{epoch+1}.pth')
-            # Only save the DEIONet weights (the learnable CNN/GRU/Head)
             torch.save(model.state_dict(), checkpoint_path)
             print(f"SAVED checkpoint: {checkpoint_path}")
 

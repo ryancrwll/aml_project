@@ -7,7 +7,6 @@ class DEIOCost(nn.Module):
         super(DEIOCost, self).__init__()
         self.robust_loss = nn.SmoothL1Loss(reduction='none', beta=huber_delta)
 
-        # We rename this internally to "pose_weight" to be clear it's for GT supervision
         self.pose_weight = imu_residual_weight
         self.event_weight = event_residual_weight
         self.prior_weight = prior_residual_weight
@@ -20,7 +19,6 @@ class DEIOCost(nn.Module):
 
         active_pose_weight = self.pose_weight
 
-        # 1. Trajectory Loss (Compare Prediction vs GT)
         # Adding small noise to GT to simulate the uncertainty a real IMU filter would have,
         # but the target essentially remains the GT.
         target_state = gt_state + (torch.randn_like(gt_state) * 1e-4) + 1e-5
